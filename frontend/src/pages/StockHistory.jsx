@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import api from '../api/axios';
-import { History, ArrowLeft, ChevronLeft, ChevronRight, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { History, ArrowLeft, ChevronLeft, ChevronRight, ArrowUpRight, ArrowDownLeft, FileText, Download } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { exportToPDF, exportToExcel } from '../utils/exportUtils';
 
 const StockHistory = () => {
     const [history, setHistory] = useState([]);
@@ -22,6 +23,37 @@ const StockHistory = () => {
         fetchHistory();
     }, [page]);
 
+    const handleExportPDF = () => {
+        const columns = [
+            { header: 'Date', dataKey: 'createdAt' },
+            { header: 'Type', dataKey: 'type' },
+            { header: 'Product', dataKey: 'product.name' },
+            { header: 'SKU', dataKey: 'product.sku' },
+            { header: 'Warehouse', dataKey: 'warehouse.name' },
+            { header: 'Change', dataKey: 'quantity' },
+            { header: 'User', dataKey: 'performedBy.name' }
+        ];
+        // Format dates before export
+        const formattedData = history.map(h => ({
+            ...h,
+            createdAt: new Date(h.createdAt).toLocaleString()
+        }));
+        exportToPDF(columns, formattedData, 'Stock_History_Report', 'Inventory Transaction History');
+    };
+
+    const handleExportExcel = () => {
+        const excelData = history.map(h => ({
+            Date: new Date(h.createdAt).toLocaleString(),
+            Type: h.type,
+            Product: h.product?.name,
+            SKU: h.product?.sku,
+            Warehouse: h.warehouse?.name,
+            Change: h.quantity,
+            User: h.performedBy?.name
+        }));
+        exportToExcel(excelData, 'Stock_History_Report');
+    };
+
     return (
         <div>
             <div className="page-header">
@@ -33,6 +65,14 @@ const StockHistory = () => {
                     </div>
                     <h1 className="page-title">Transaction History</h1>
                     <p style={{ color: '#6B7280' }}>Audit trail of all stock movements</p>
+                </div>
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                    <button onClick={handleExportPDF} className="btn btn-secondary">
+                        <FileText size={18} /> <span className="hide-mobile">PDF Report</span>
+                    </button>
+                    <button onClick={handleExportExcel} className="btn btn-secondary">
+                        <Download size={18} /> <span className="hide-mobile">Excel Sheet</span>
+                    </button>
                 </div>
             </div>
 

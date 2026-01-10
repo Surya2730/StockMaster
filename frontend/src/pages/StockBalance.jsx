@@ -1,11 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useContext } from 'react';
 import api from '../api/axios';
-import { Layers, Search, ArrowRightLeft } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import AuthContext from '../context/AuthContext';
+import { Layers, Search, ArrowRightLeft, FileText, Download, Filter } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
+import { exportToPDF, exportToExcel } from '../utils/exportUtils';
 
 const StockBalance = () => {
+    const { user } = useContext(AuthContext);
+    const location = useLocation();
+    const queryParams = new URLSearchParams(location.search);
+    const initialFilter = queryParams.get('filter') === 'low';
+
     const [stocks, setStocks] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
+    const [showLowStockOnly, setShowLowStockOnly] = useState(initialFilter);
 
     useEffect(() => {
         const fetchStock = async () => {
@@ -19,10 +27,38 @@ const StockBalance = () => {
         fetchStock();
     }, []);
 
-    const filteredStocks = stocks.filter(s =>
-        s.product?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        s.product?.sku.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const filteredStocks = stocks.filter(s => {
+        const matchesSearch = s.product?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            s.product?.sku.toLowerCase().includes(searchTerm.toLowerCase());
+
+        if (showLowStockOnly) {
+            return matchesSearch && s.quantity <= (s.product?.reorderLevel || 0);
+        }
+        return matchesSearch;
+    });
+
+    const handleExportPDF = () => {
+        const columns = [
+            { header: 'Product', dataKey: 'product.name' },
+            { header: 'SKU', dataKey: 'product.sku' },
+            { header: 'Warehouse', dataKey: 'warehouse.name' },
+            { header: 'Location', dataKey: 'location.name' },
+            { header: 'Quantity', dataKey: 'quantity' }
+        ];
+        exportToPDF(columns, filteredStocks, 'Stock_Balance_Report', showLowStockOnly ? 'Low Stock Alert Report' : 'Current Stock Balance Report');
+    };
+
+    const handleExportExcel = () => {
+        const excelData = filteredStocks.map(s => ({
+            Product: s.product?.name,
+            SKU: s.product?.sku,
+            Warehouse: s.warehouse?.name,
+            Location: s.location?.name || 'N/A',
+            Quantity: s.quantity,
+            Status: s.quantity <= (s.product?.reorderLevel || 0) ? 'LOW STOCK' : 'OK'
+        }));
+        exportToExcel(excelData, 'Stock_Balance_Report');
+    };
 
     return (
         <div>
@@ -31,24 +67,40 @@ const StockBalance = () => {
                     <h1 className="page-title">Current Stock Balance</h1>
                     <p style={{ color: '#6B7280' }}>Real-time inventory levels across all locations</p>
                 </div>
-                <div style={{ display: 'flex', gap: '1rem' }}>
-                    <Link to="/inventory/history" className="btn btn-secondary">
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                    <button onClick={handleExportPDF} className="btn btn-secondary" title="Export as PDF">
+                        <FileText size={18} /> <span className="hide-mobile">PDF</span>
+                    </button>
+                    <button onClick={handleExportExcel} className="btn btn-secondary" title="Export as Excel">
+                        <Download size={18} /> <span className="hide-mobile">Excel</span>
+                    </button>
+                    <Link to="/inventory/history" className="btn btn-primary">
                         <ArrowRightLeft size={18} /> View History
                     </Link>
                 </div>
             </div>
 
             <div className="card" style={{ marginBottom: '2rem', padding: '1rem 1.5rem' }}>
-                <div style={{ position: 'relative' }}>
-                    <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#9CA3AF' }} />
-                    <input
-                        type="text"
-                        className="form-input"
-                        style={{ paddingLeft: '2.5rem' }}
-                        placeholder="Search stock by product or SKU..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                    />
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                    <div style={{ position: 'relative', flex: 1 }}>
+                        <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#9CA3AF' }} />
+                        <input
+                            type="text"
+                            className="form-input"
+                            style={{ paddingLeft: '2.5rem' }}
+                            placeholder="Search stock by product or SKU..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                    <button
+                        onClick={() => setShowLowStockOnly(!showLowStockOnly)}
+                        className={`btn ${showLowStockOnly ? 'btn-primary' : 'btn-secondary'}`}
+                        style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}
+                    >
+                        <Filter size={18} />
+                        {showLowStockOnly ? 'Showing Low Stock' : 'Filter Low Stock'}
+                    </button>
                 </div>
             </div>
 

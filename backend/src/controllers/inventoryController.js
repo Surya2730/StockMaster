@@ -205,11 +205,15 @@ const getStockHistory = asyncHandler(async (req, res) => {
 // @route   GET /api/inventory/stats
 // @access  Private
 const getDashboardStats = asyncHandler(async (req, res) => {
-    const totalProducts = await require('../models/Product').countDocuments({});
-    const totalWarehouses = await require('../models/Warehouse').countDocuments({});
+    const Product = require('../models/Product');
+    const Warehouse = require('../models/Warehouse');
+    const Stock = require('../models/Stock');
+
+    const totalProducts = await Product.countDocuments({});
+    const totalWarehouses = await Warehouse.countDocuments({});
 
     // Aggregate total stock across all entries
-    const stockAggregation = await require('../models/Stock').aggregate([
+    const stockAggregation = await Stock.aggregate([
         {
             $group: {
                 _id: null,
@@ -219,20 +223,77 @@ const getDashboardStats = asyncHandler(async (req, res) => {
     ]);
     const totalStock = stockAggregation.length > 0 ? stockAggregation[0].totalStock : 0;
 
-    const lowStockCount = await require('../models/Product').countDocuments({
-        // This is tricky without lookup, but for now assuming ReorderLevel is static
-        // Ideally we check Stock vs Product.ReorderLevel. 
-        // For MVP, just returning count of products. 
-        // Correct implementation requires aggregation or separate check.
-        // We will just return 0 or implement a simple check if possible.
-        // Let's just return totalProducts and basic counts for now.
-    });
+    // Correct Low Stock Count calculation:
+    // 1. Group stock by product
+    // 2. Lookup product details (reorderLevel)
+    // 3. Filter where total stock <= reorderLevel
+    const lowStockAggregation = await Stock.aggregate([
+        {
+            $group: {
+                _id: '$product',
+                totalQty: { $sum: '$quantity' }
+            }
+        },
+        {
+            $lookup: {
+                from: 'products',
+                localField: '_id',
+                foreignField: '_id',
+                as: 'product'
+            }
+        },
+        { $unwind: '$product' },
+        {
+            $match: {
+                $expr: { $lte: ['$totalQty', '$product.reorderLevel'] }
+            }
+        },
+        { $count: 'lowStockCount' }
+    ]);
+
+    const lowStockCount = lowStockAggregation.length > 0 ? lowStockAggregation[0].lowStockCount : 0;
+
+    // 5. Stock by Category (Pie Chart Data)
+    const categoryAggregation = await Product.aggregate([
+        {
+            $group: {
+                _id: '$category',
+                count: { $sum: 1 }
+            }
+        },
+        { $project: { name: '$_id', value: '$count', _id: 0 } }
+    ]);
+
+    // 6. Monthly Movement Trends (Bar Chart Data - Last 6 Months)
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+    const movementAggregation = await require('../models/StockLedger').aggregate([
+        {
+            $match: {
+                createdAt: { $gte: sixMonthsAgo }
+            }
+        },
+        {
+            $group: {
+                _id: {
+                    month: { $month: '$createdAt' },
+                    year: { $year: '$createdAt' },
+                    type: { $cond: [{ $gt: ['$quantity', 0] }, 'In', 'Out'] }
+                },
+                total: { $sum: { $abs: '$quantity' } }
+            }
+        },
+        { $sort: { '_id.year': 1, '_id.month': 1 } }
+    ]);
 
     res.json({
         totalProducts,
         totalWarehouses,
         totalStock,
-        lowStockCount: 0 // Placeholder
+        lowStockCount,
+        categoryData: categoryAggregation,
+        movementData: movementAggregation
     });
 });
 
